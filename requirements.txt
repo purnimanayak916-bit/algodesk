@@ -1,0 +1,10 @@
+streamlit>=1.36.0
+pandas>=2.0.0
+numpy>=1.26.0
+plotly>=5.20.0
+requests>=2.31.0
+
+# Broker SDKs — comment out any you don't need
+kiteconnect>=5.0.1        # Zerodha
+smartapi-python>=1.4.8    # Angel One
+pyotp>=2.9.0              # Angel One TOTP generation, if you automate it
