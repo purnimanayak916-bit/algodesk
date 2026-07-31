@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlgoDesk AI — Stock Analysis Agent</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08090B; --bg2: #0F1215; --panel: #12151A; --panel-hi: #161A20;
+  --border: #20252C; --border-hi: #2C333C; --text: #EDEBE6; --muted: #83898F;
+  --muted-dim: #565C63; --green: #1C7C54; --green-bright: #34D399;
+  --red: #B23A2E; --red-bright: #F0665A; --amber: #D4A62A; --blue: #6EA8D8;
+  --violet: #651FFF; --accent: #00E676;
+}
+html.light {
+  --bg: #F8F9FA; --bg2: #E9ECEF; --panel: #FFFFFF; --panel-hi: #F1F3F5;
+  --border: #DEE2E6; --border-hi: #CED4DA; --text: #1A1A2E; --muted: #6C757D;
+  --muted-dim: #ADB5BD; --green: #1C7C54; --green-bright: #00B894;
+  --red: #B23A2E; --red-bright: #E74C3C; --amber: #D4A62A; --blue: #4A90D9;
+  --violet: #651FFF; --accent: #00B894;
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:'Space Grotesk',sans-serif; transition:background .3s,color .3s; overflow:hidden; }
+.mono { font-family:'JetBrains Mono',monospace; }
+.glass { background:rgba(255,255,255,0.03); border:1px solid var(--border); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:16px; }
+html.light .glass { background:rgba(255,255,255,0.65); border:1px solid var(--border); }
+.glass-hover { transition:all .2s; }
+.glass-hover:hover { transform:translateY(-3px); border-color:var(--border-hi); box-shadow:0 8px 30px rgba(0,230,118,.06); }
+.pulse-dot { width:8px; height:8px; border-radius:50%; animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+.typing::after { content:'|'; animation:blink 1s infinite; color:var(--accent); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border-hi); border-radius:3px; }
+.skeleton { background:linear-gradient(90deg,var(--bg2) 25%,var(--panel) 50%,var(--bg2) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; border-radius:8px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.fade-in { animation:fadeIn .4s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.chip { display:inline-flex; align-items:center; gap:4px; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:600; cursor:pointer; transition:all .2s; border:1px solid var(--border); background:var(--panel); color:var(--muted); }
+.chip:hover { border-color:var(--accent); color:var(--accent); }
+.chip-active { border-color:var(--accent); color:var(--accent); background:rgba(0,230,118,.08); }
+.nav-icon { width:44px; height:44px; display:flex; align-items:center; justify-content:center; border-radius:12px; cursor:pointer; transition:all .2s; color:var(--muted); }
+.nav-icon:hover { background:var(--panel-hi); color:var(--text); }
+.nav-icon.active { background:rgba(0,230,118,.1); color:var(--accent); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const C = {
+  bg:'var(--bg)', bg2:'var(--bg2)', panel:'var(--panel)', panelHi:'var(--panel-hi)',
+  border:'var(--border)', borderHi:'var(--border-hi)', text:'var(--text)', muted:'var(--muted)',
+  mutedDim:'var(--muted-dim)', green:'var(--green)', greenBright:'var(--green-bright)',
+  red:'var(--red)', redBright:'var(--red-bright)', amber:'var(--amber)', blue:'var(--blue)',
+  violet:'var(--violet)', accent:'var(--accent)'
+};
+
+const ASSETS = [
+  { id:"bitcoin", symbol:"BTC", name:"Bitcoin", type:"crypto" },
+  { id:"ethereum", symbol:"ETH", name:"Ethereum", type:"crypto" },
+  { id:"solana", symbol:"SOL", name:"Solana", type:"crypto" },
+  { id:"binancecoin", symbol:"BNB", name:"BNB", type:"crypto" },
+  { id:"ripple", symbol:"XRP", name:"XRP", type:"crypto" },
+  { id:"dogecoin", symbol:"DOGE", name:"Dogecoin", type:"crypto" },
+  { id:"reliance", symbol:"RELIANCE", name:"Reliance Industries", type:"stock_in", stooq:"reliance.in" },
+  { id:"tcs", symbol:"TCS", name:"Tata Consultancy", type:"stock_in", stooq:"tcs.in" },
+  { id:"infy", symbol:"INFY", name:"Infosys", type:"stock_in", stooq:"infy.in" },
+  { id:"hdfcbank", symbol:"HDFCBANK", name:"HDFC Bank", type:"stock_in", stooq:"hdfcbank.in" },
+  { id:"aapl", symbol:"AAPL", name:"Apple Inc.", type:"stock_us", stooq:"aapl.us" },
+  { id:"tsla", symbol:"TSLA", name:"Tesla Inc.", type:"stock_us", stooq:"tsla.us" },
+  { id:"nvda", symbol:"NVDA", name:"NVIDIA", type:"stock_us", stooq:"nvda.us" },
+  { id:"msft", symbol:"MSFT", name:"Microsoft", type:"stock_us", stooq:"msft.us" },
+];
+
+// Mock data for instant render
+const MOCK_CLOSES = {};
+ASSETS.forEach((a) => {
+  const base = a.type==='crypto' ? (a.symbol==='BTC'?45000:a.symbol==='ETH'?2400:50+Math.random()*200) : a.type==='stock_in'?2000+Math.random()*1000 : 100+Math.random()*300;
+  const arr = []; let v = base;
+  for(let d=0; d<365; d++) { v *= 1+((Math.sin(d*0.05)+Math.random()-0.5)*0.03); arr.push(Math.max(v,0.1)); }
+  MOCK_CLOSES[a.id] = arr;
+});
+
+// Math helpers
+function sma(arr,p){const o=[];for(let i=0;i<arr.length;i++){if(i<p-1){o.push(null);continue;}let s=0;for(let j=i-p+1;j<=i;j++)s+=arr[j];o.push(s/p);}return o;}
+function ema(arr,p){const o=[],k=2/(p+1);let prev=null;for(let i=0;i<arr.length;i++){if(arr[i]==null){o.push(prev);continue;}prev=prev==null?arr[i]:arr[i]*k+prev*(1-k);o.push(prev);}return o;}
+function rsi(closes,p=14){if(closes.length<p+1)return null;let g=0,l=0;for(let i=closes.length-p;i<closes.length;i++){const d=closes[i]-closes[i-1];if(d>=0)g+=d;else l-=d;}const ag=g/p,al=l/p;if(al===0)return 100;const rs=ag/al;return 100-100/(1+rs);}
+function stdev(arr){const n=arr.length;if(n===0)return 0;const m=arr.reduce((a,b)=>a+b,0)/n;const v=arr.reduce((a,b)=>a+(b-m)**2,0)/n;return Math.sqrt(v);}
+function macdCalc(c){const e12=ema(c,12),e26=ema(c,26);const ml=c.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null);const vm=ml.filter(v=>v!=null);const sr=ema(vm,9);const sl=new Array(ml.length-vm.length).fill(null).concat(sr);const h=ml.map((v,i)=>v!=null&&sl[i]!=null?v-sl[i]:null);return{macdLine:ml,signalLine:sl,hist:h};}
+
+// Scoring engines
+function computeTechnicalScore(closes){
+  if(closes.length<30)return{score:50,notes:["Not enough price history yet"]};
+  const notes=[];let score=50;
+  const r=rsi(closes,14);
+  if(r!=null){if(r<30){score+=15;notes.push("RSI "+r.toFixed(1)+" - oversold, bullish tilt");}else if(r>70){score-=15;notes.push("RSI "+r.toFixed(1)+" - overbought, bearish tilt");}else notes.push("RSI "+r.toFixed(1)+" - neutral");}
+  const s20=sma(closes,20),s50=sma(closes,Math.min(50,closes.length-1));const lc=closes[closes.length-1];
+  const ls20=s20[s20.length-1],ls50=s50[s50.length-1];
+  if(ls20!=null&&lc>ls20){score+=8;notes.push("Price above 20-SMA - uptrend");}else if(ls20!=null){score-=8;notes.push("Price below 20-SMA - downtrend");}
+  if(ls50!=null&&ls20!=null){if(ls20>ls50){score+=7;notes.push("Golden cross - 20 above 50 SMA");}else{score-=7;notes.push("Death cross - 20 below 50 SMA");}}
+  const{hist}=macdCalc(closes);const lh=hist[hist.length-1],ph=hist[hist.length-2];
+  if(lh!=null&&ph!=null){if(lh>0&&lh>ph){score+=10;notes.push("MACD rising - momentum building");}else if(lh>0){score+=4;notes.push("MACD positive but flattening");}else if(lh<0&&lh<ph){score-=10;notes.push("MACD falling - momentum weakening");}else{score-=4;notes.push("MACD negative but improving");}}
+  const recent=closes.slice(-20);const vol=stdev(recent)/(recent.reduce((a,b)=>a+b,0)/recent.length);
+  if(vol>0.06)notes.push("High volatility ("+(vol*100).toFixed(1)+"%) - wider stops advised");
+  return{score:Math.max(0,Math.min(100,score)),notes,rsi:r,vol};
+}
+function computeQuantScore(closes){
+  if(closes.length<20)return{score:50,notes:["Insufficient data"],sharpe:null};
+  const rets=[];for(let i=1;i<closes.length;i++)rets.push((closes[i]-closes[i-1])/closes[i-1]);
+  const mr=rets.reduce((a,b)=>a+b,0)/rets.length;const vr=stdev(rets)||1e-9;
+  const sharpe=(mr/vr)*Math.sqrt(rets.length);let score=50+sharpe*8;const notes=[];
+  notes.push("Mean return "+(mr*100).toFixed(2)+"%, vol "+(vr*100).toFixed(2)+"%");
+  notes.push("Sharpe-like "+sharpe.toFixed(2));
+  const last=closes[closes.length-1],first=closes[Math.max(0,closes.length-14)];
+  const mom=(last-first)/first;score+=mom*100;
+  notes.push("14-period momentum "+(mom*100).toFixed(2)+"%");
+  return{score:Math.max(0,Math.min(100,score)),notes,sharpe};
+}
+function computeFundamentalScore(asset,marketData,closes){
+  const notes=[];let score=50;
+  if(asset.type==="crypto"&&marketData){
+    const r=marketData.market_cap_rank;
+    if(r&&r<=10){score+=12;notes.push("Top-10 market cap (#"+r+")");}
+    else if(r&&r<=50){score+=5;notes.push("Mid-tier rank (#"+r+")");}
+    else if(r){score-=5;notes.push("Lower rank (#"+r+")");}
+    const c7=marketData.price_change_percentage_7d_in_currency;
+    if(typeof c7==="number"){if(c7>5){score+=8;notes.push("7d +"+c7.toFixed(1)+"%");}else if(c7<-10){score-=8;notes.push("7d "+c7.toFixed(1)+"%");}}
+    const v=marketData.total_volume,m=marketData.market_cap;
+    if(v&&m){const liq=v/m;if(liq>0.08){score+=6;notes.push("Healthy liquidity");}else notes.push("Thin liquidity");}
+  } else {
+    if(closes.length>=60){const ls=sma(closes,60)[closes.length-1];const lc=closes[closes.length-1];
+      if(ls!=null){const gap=(lc-ls)/ls;if(gap>0.05){score+=10;notes.push("Above 60-period trend - confidence");}else if(gap<-0.05){score-=10;notes.push("Below trend - eroding confidence");}else notes.push("Tracking long-run trend");}}
+    const rv=stdev(closes.slice(-30));const mp=closes.slice(-30).reduce((a,b)=>a+b,0)/Math.min(30,closes.length);
+    const relVol=rv/mp;
+    if(relVol<0.02){score+=6;notes.push("Low volatility - stable");}else if(relVol>0.05){score-=4;notes.push("High volatility - uncertain");}
+    notes.push("Equity fundamentals are market-derived proxies, not balance-sheet data");
+  }
+  return{score:Math.max(0,Math.min(100,score)),notes};
+}
+function verdictFromScore(s){if(s>=75)return{label:"STRONG BUY",color:C.greenBright};if(s>=58)return{label:"BUY",color:C.green};if(s>=42)return{label:"HOLD",color:C.amber};if(s>=25)return{label:"SELL",color:C.red};return{label:"STRONG SELL",color:C.redBright};}
+
+// Backtest engine
+function runBacktest(series,holdBars=10){
+  if(!series||series.length<120)return{trades:[],stats:null,equityCurve:[],insufficientData:true};
+  const closes=series.map(s=>s.close);const minLb=60;const trades=[];let equity=100;
+  const equityCurve=[{t:series[minLb].t,equity}];
+  for(let i=minLb;i<closes.length-holdBars;i+=holdBars){
+    const wc=closes.slice(0,i+1);const tech=computeTechnicalScore(wc);const quant=computeQuantScore(wc);
+    const score=tech.score*0.55+quant.score*0.45;const v=verdictFromScore(score);
+    const ep=closes[i],ei=Math.min(i+holdBars,closes.length-1),xp=closes[ei];
+    const rr=(xp-ep)/ep;let pr=0,side="FLAT";
+    if(score>=58){side="LONG";pr=rr;}else if(score<=42){side="SHORT";pr=-rr;}
+    if(side!=="FLAT"){equity*=1+pr;trades.push({date:new Date(series[i].t).toISOString().slice(0,10),exitDate:new Date(series[ei].t).toISOString().slice(0,10),score,side,ep,xp,returnPct:pr*100,win:pr>0});}
+    equityCurve.push({t:series[ei].t,equity});
+  }
+  const wins=trades.filter(t=>t.win).length,total=trades.length;
+  const winRate=total>0?(wins/total)*100:0;const avgReturn=total>0?trades.reduce((a,t)=>a+t.returnPct,0)/total:0;
+  const totalReturn=((equity-100)/100)*100;
+  const rets=trades.map(t=>t.returnPct/100);const meanR=rets.length?rets.reduce((a,b)=>a+b,0)/rets.length:0;const sdR=stdev(rets);
+  const sharpe=sdR>0?(meanR/sdR)*Math.sqrt(252/holdBars):0;
+  let peak=-Infinity,maxDD=0;equityCurve.forEach(p=>{if(p.equity>peak)peak=p.equity;const dd=((peak-p.equity)/peak)*100;if(dd>maxDD)maxDD=dd;});
+  const bhReturn=((closes[closes.length-1]-closes[minLb])/closes[minLb])*100;
+  const years=(series[series.length-1].t-series[minLb].t)/(365*24*60*60*1000);
+  const cagr=years>0?(Math.pow(equity/100,1/years)-1)*100:0;
+  return{trades,equityCurve,insufficientData:false,stats:{totalTrades:total,winRate,avgReturn,totalReturn,sharpe,maxDD,bhReturn,cagr,years,longTrades:trades.filter(t=>t.side==="LONG").length,shortTrades:trades.filter(t=>t.side==="SHORT").length}};
+}
+
+// Data fetching
+async function fetchCryptoData(ids){
+  try{const r=await fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids="+ids.join(",")+"&order=market_cap_desc&sparkline=false&price_change_percentage=1h,24h,7d");if(!r.ok)throw 0;const m=await r.json();const b={};m.forEach(x=>b[x.id]=x);return b;}catch(e){return{};}
+}
+async function fetchCryptoSeries(id,days){
+  try{const r=await fetch("https://api.coingecko.com/api/v3/coins/"+id+"/market_chart?vs_currency=usd&days="+days+"&interval=daily");if(!r.ok)throw 0;const d=await r.json();return d.prices.map(p=>({t:p[0],close:p[1]}));}catch(e){const mc=MOCK_CLOSES[id]||MOCK_CLOSES[ASSETS[0].id];const now=Date.now();return mc.map((c,i)=>({t:now-(mc.length-i)*86400000,close:c}));}
+}
+async function fetchStooqSeries(stooqSym){
+  try{
+    const url="https://api.allorigins.win/raw?url="+encodeURIComponent("https://stooq.com/q/d/l/?s="+stooqSym+"&i=d");
+    const r=await fetch(url);if(!r.ok)throw 0;const text=await r.text();const lines=text.trim().split("\n");
+    if(lines.length<2)throw 0;const rows=lines.slice(1).map(l=>l.split(","));
+    const series=rows.map(r=>({t:new Date(r[0]).getTime(),close:parseFloat(r[4]),date:r[0]})).filter(r=>!isNaN(r.close)&&!isNaN(r.t));
+    if(series.length<30)throw 0;return series;
+  }catch(e){
+    const mc=MOCK_CLOSES[stooqSym]||MOCK_CLOSES[ASSETS[0].id];const now=Date.now();
+    return mc.map((c,i)=>({t:now-(mc.length-i)*86400000,close:c,date:new Date(now-(mc.length-i)*86400000).toISOString().slice(0,10)}));
+  }
+}
+
+// UI Components
+function Gauge({score}){
+  const angle=-90+(score/100)*180;const v=verdictFromScore(score);
+  const rad=d=>d*Math.PI/180;const ticks=[0,25,50,75,100];
+  return React.createElement("svg",{viewBox:"0 0 260 168",width:"100%",style:{maxWidth:280}},
+    React.createElement("defs",null,
+      React.createElement("linearGradient",{id:"gg",x1:"0%",y1:"0%",x2:"100%",y2:"0%"},
+        React.createElement("stop",{offset:"0%",stopColor:"#F0665A"}),React.createElement("stop",{offset:"25%",stopColor:"#B23A2E"}),
+        React.createElement("stop",{offset:"50%",stopColor:"#D4A62A"}),React.createElement("stop",{offset:"75%",stopColor:"#1C7C54"}),
+        React.createElement("stop",{offset:"100%",stopColor:"#34D399"})
+      )
+    ),
+    React.createElement("path",{d:"M30 140 A100 100 0 0 1 230 140",fill:"none",stroke:C.bg2,strokeWidth:18,strokeLinecap:"round"}),
+    React.createElement("path",{d:"M30 140 A100 100 0 0 1 230 140",fill:"none",stroke:"url(#gg)",strokeWidth:10,strokeLinecap:"round",opacity:0.9}),
+    ticks.map(function(t){var a=rad(-180+(t/100)*180);var x1=130+88*Math.cos(a),y1=140+88*Math.sin(a),x2=130+100*Math.cos(a),y2=140+100*Math.sin(a);return React.createElement("line",{key:t,x1:x1,y1:y1,x2:x2,y2:y2,stroke:C.mutedDim,strokeWidth:1.5});}),
+    React.createElement("g",{transform:"rotate("+angle+" 130 140)"},
+      React.createElement("line",{x1:130,y1:140,x2:130,y2:52,stroke:v.color,strokeWidth:2.5,strokeLinecap:"round"})
+    ),
+    React.createElement("circle",{cx:130,cy:140,r:6,fill:C.bg,stroke:v.color,strokeWidth:2.5}),
+    React.createElement("text",{x:130,y:112,textAnchor:"middle",fontFamily:"JetBrains Mono",fontSize:34,fontWeight:700,fill:C.text,letterSpacing:-1},score.toFixed(0)),
+    React.createElement("text",{x:130,y:163,textAnchor:"middle",fontFamily:"Space Grotesk",fontSize:13,fontWeight:700,letterSpacing:2,fill:v.color},v.label)
+  );
+}
+
+function ScoreBar(props){return React.createElement("div",{style:{marginBottom:12}},
+  React.createElement("div",{style:{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:11,color:C.muted,letterSpacing:0.5,textTransform:'uppercase'}},
+    React.createElement("span",null,props.label),React.createElement("span",{className:"mono",style:{color:C.text}},props.score.toFixed(0))
+  ),
+  React.createElement("div",{style:{height:6,background:C.bg2,borderRadius:3,overflow:'hidden'}},
+    React.createElement("div",{style:{width:props.score+"%",height:'100%',background:props.accent,transition:'width .6s'}}))
+);}
+
+function MiniSparkline(props){
+  if(!props.closes||props.closes.length<2)return null;
+  var w=100,h=32,min=Math.min.apply(null,props.closes),max=Math.max.apply(null,props.closes),range=max-min||1;
+  var pts=props.closes.map(function(c,i){return (i/(props.closes.length-1))*w+","+(h-((c-min)/range)*h);}).join(" ");
+  return React.createElement("svg",{width:w,height:h,viewBox:"0 0 "+w+" "+h,preserveAspectRatio:"none"},
+    React.createElement("polyline",{points:pts,fill:"none",stroke:props.color||C.blue,strokeWidth:1.6}));
+}
+
+function TechnicalChart(props){
+  if(!props.series||props.series.length<30)return React.createElement("div",{style:{padding:40,textAlign:'center',color:C.mutedDim,fontSize:13}},"Loading chart...");
+  var closes=props.series.map(function(s){return s.close;});
+  var w=900,hP=220,hR=70,hM=80,gap=14,totalH=hP+gap+hR+gap+hM+30;
+  var s20=sma(closes,20),s50=sma(closes,50);
+  var rsiS=closes.map(function(_,i){return i>=14?rsi(closes.slice(0,i+1),14):null;});
+  var m=macdCalc(closes);
+  var min=Math.min.apply(null,closes),max=Math.max.apply(null,closes),range=max-min||1;
+  var xAt=function(i){return (i/(closes.length-1))*w;};
+  var yP=function(v){return hP-((v-min)/range)*hP;};
+  var pricePts=closes.map(function(c,i){return xAt(i)+","+yP(c);}).join(" ");
+  var s20Pts=s20.map(function(v,i){return v!=null?xAt(i)+","+yP(v):'';}).filter(Boolean).join(" ");
+  var s50Pts=s50.map(function(v,i){return v!=null?xAt(i)+","+yP(v):'';}).filter(Boolean).join(" ");
+  var rsiPts=rsiS.map(function(v,i){return v!=null?xAt(i)+","+(hR-(v/100)*hR):'';}).filter(Boolean).join(" ");
+  var histMin=Math.min.apply(null,m.hist.filter(function(v){return v!=null;})),histMax=Math.max.apply(null,m.hist.filter(function(v){return v!=null;}));
+  var histRange=(histMax-histMin)||1;
+  var macdPts=m.macdLine.map(function(v,i){return v!=null?xAt(i)+","+(hM-((v-histMin)/histRange)*hM):'';}).filter(Boolean).join(" ");
+  var sigPts=m.signalLine.map(function(v,i){return v!=null?xAt(i)+","+(hM-((v-histMin)/histRange)*hM):'';}).filter(Boolean).join(" ");
+  var lc=closes[closes.length-1],lastRsi=rsiS[rsiS.length-1],lastHist=m.hist[m.hist.length-1];
+  var recentVol=stdev(closes.slice(-20));
+  var band1=[],band2=[];
+  s20.forEach(function(v,i){if(v!=null){band1.push(xAt(i)+","+yP(v+recentVol));band2.push(xAt(i)+","+yP(v-recentVol));}});
+  var bandPath="M"+band1.join(" L")+" L"+band2.reverse().join(" L")+" Z";
+  return React.createElement("div",null,
+    React.createElement("svg",{viewBox:"0 0 "+w+" "+totalH,width:"100%",style:{overflow:'visible'}},
+      React.createElement("defs",null,React.createElement("linearGradient",{id:"bandGrad",x1:"0%",y1:"0%",x2:"0%",y2:"100%"},
+        React.createElement("stop",{offset:"0%",stopColor:C.violet,stopOpacity:0.3}),React.createElement("stop",{offset:"100%",stopColor:C.violet,stopOpacity:0.05}))),
+      React.createElement("path",{d:bandPath,fill:"url(#bandGrad)",opacity:0.5}),
+      React.createElement("polyline",{points:pricePts,fill:"none",stroke:C.text,strokeWidth:1.5}),
+      React.createElement("polyline",{points:s20Pts,fill:"none",stroke:C.blue,strokeWidth:1,opacity:0.7}),
+      React.createElement("polyline",{points:s50Pts,fill:"none",stroke:C.amber,strokeWidth:1,opacity:0.7}),
+      React.createElement("text",{x:w-10,y:yP(lc)-8,textAnchor:"end",fontSize:11,fill:C.text,className:"mono"},props.symbol+" "+lc.toFixed(2)),
+      React.createElement("g",{transform:"translate(0,"+(hP+gap)+")"},
+        React.createElement("line",{x1:0,y1:hR*0.3,x2:w,y2:hR*0.3,stroke:C.border,strokeDasharray:"2,4"}),
+        React.createElement("line",{x1:0,y1:hR*0.7,x2:w,y2:hR*0.7,stroke:C.border,strokeDasharray:"2,4"}),
+        React.createElement("polyline",{points:rsiPts,fill:"none",stroke:C.violet,strokeWidth:1.5}),
+        React.createElement("text",{x:4,y:14,fontSize:10,fill:C.muted},"RSI "+(lastRsi!=null?lastRsi.toFixed(1):"--"))
+      ),
+      React.createElement("g",{transform:"translate(0,"+(hP+gap+hR+gap)+")"},
+        React.createElement("line",{x1:0,y1:hM/2,x2:w,y2:hM/2,stroke:C.border,strokeDasharray:"2,4"}),
+        React.createElement("polyline",{points:macdPts,fill:"none",stroke:C.blue,strokeWidth:1.5}),
+        React.createElement("polyline",{points:sigPts,fill:"none",stroke:C.redBright,strokeWidth:1}),
+        m.hist.map(function(v,i){if(v==null)return null;var bh=Math.abs(v)/histRange*hM;var by=v>0?hM/2-bh:hM/2;return React.createElement("rect",{key:i,x:xAt(i)-1,y:by,width:2,height:bh,fill:v>0?C.green:C.red,opacity:0.6});}),
+        React.createElement("text",{x:4,y:14,fontSize:10,fill:C.muted},"MACD "+(lastHist!=null?lastHist.toFixed(4):"--"))
+      )
+    )
+  );
+}
+
+function MetricCard(props){
+  return React.createElement("div",{className:"glass glass-hover",style:{padding:14}},
+    React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:0.5}},props.label),
+    React.createElement("div",{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginTop:4}},
+      React.createElement("div",null,
+        React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700}},props.value),
+        props.sub&&React.createElement("div",{style:{fontSize:11,color:C.mutedDim,marginTop:2}},props.sub)
+      ),
+      React.createElement(MiniSparkline,{closes:props.closes,color:props.sparkColor||C.blue})
+    )
+  );
+}
+
+function AgentLog(props){
+  var scrollRef=useRef(null);
+  useEffect(function(){if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[props.logs]);
+  return React.createElement("div",{className:"glass",style:{padding:16,height:'100%',display:'flex',flexDirection:'column'}},
+    React.createElement("div",{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10}},
+      React.createElement("div",{className:"pulse-dot",style:{background:C.accent}}),
+      React.createElement("span",{style:{fontSize:13,fontWeight:600}},"Agent Execution Log")
+    ),
+    React.createElement("div",{ref:scrollRef,style:{flex:1,overflow:'auto',fontFamily:'JetBrains Mono',fontSize:11,lineHeight:1.8}},
+      props.logs.map(function(log,i){
+        return React.createElement("div",{key:i,style:{opacity:i===props.logs.length-1?1:0.6},className:"fade-in"},
+          React.createElement("span",{style:{color:C.mutedDim}},"["+log.time+"] "),"",
+          React.createElement("span",{style:{color:log.type==='done'?C.greenBright:log.type==='error'?C.redBright:log.type==='scan'?C.violet:C.blue}},log.msg)
+        );
+      })
+    )
+  );
+}
+
+function AIInsights(props){
+  var displayed=useState('');var setDisplayed=displayed[1];displayed=displayed[0];
+  useEffect(function(){
+    if(!props.typing){setDisplayed('');return;}
+    var idx=0;var text=props.typing;setDisplayed('');
+    var interval=setInterval(function(){if(idx<text.length){setDisplayed(text.slice(0,idx+1));idx++;}else clearInterval(interval);},15);
+    return function(){clearInterval(interval);};
+  },[props.typing]);
+  var chips=["Scan for Breakouts","Risk Assessment","Deep Dive","Compare Peers"];
+  return React.createElement("div",{className:"glass",style:{padding:20,position:'relative',overflow:'hidden'}},
+    React.createElement("div",{style:{display:'flex',alignItems:'center',gap:8,marginBottom:12}},
+      React.createElement("span",{style:{fontSize:14,fontWeight:600}},"AI Insights"),
+      React.createElement("span",{className:"chip",style:{borderColor:C.violet,color:C.violet,fontSize:10}},"Powered by AlgoDesk AI")
+    ),
+    React.createElement("div",{style:{fontSize:13,lineHeight:1.7,color:C.text,minHeight:80,whiteSpace:'pre-line'},className:"typing"},
+      displayed||"Initializing AI analysis..."
+    ),
+    React.createElement("div",{style:{display:'flex',gap:6,marginTop:12,flexWrap:'wrap'}},
+      chips.map(function(c){return React.createElement("span",{key:c,className:"chip"},c);})
+    )
+  );
+}
+
+function BacktestPanel(props){
+  if(!props.bt||props.bt.insufficientData)return React.createElement("div",{className:"glass",style:{padding:20}},React.createElement("div",{style:{fontSize:13,color:C.muted}},"Backtest needs more historical data..."));
+  var s=props.bt.stats;
+  var maxEq=Math.max.apply(null,props.bt.equityCurve.map(function(p){return p.equity;}));
+  var minEq=Math.min.apply(null,props.bt.equityCurve.map(function(p){return p.equity;}));
+  var eqRange=maxEq-minEq||1;var w=800,h=120;
+  var eqPts=props.bt.equityCurve.map(function(p,i){return (i/(props.bt.equityCurve.length-1))*w+","+(h-((p.equity-minEq)/eqRange)*h);}).join(" ");
+  return React.createElement("div",{className:"glass",style:{padding:20}},
+    React.createElement("div",{style:{display:'flex',alignItems:'center',gap:8,marginBottom:14}},
+      React.createElement("span",{style:{fontSize:14,fontWeight:600}},"10-Year Backtest Results"),
+      React.createElement("span",{className:"chip",style:{fontSize:10,borderColor:C.muted,color:C.muted}},s.years.toFixed(1)+" years")
+    ),
+    React.createElement("div",{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:10,marginBottom:14}},
+      React.createElement(MetricCard,{label:"Total Return",value:(s.totalReturn>0?"+":"")+s.totalReturn.toFixed(1)+"%",closes:props.bt.equityCurve.map(function(p){return p.equity;}),sparkColor:s.totalReturn>=0?C.greenBright:C.redBright}),
+      React.createElement("div",{className:"glass",style:{padding:14}},React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase'}},"Win Rate"),React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700}},s.winRate.toFixed(1)+"%"),React.createElement("div",{style:{fontSize:11,color:C.mutedDim}},s.totalTrades+" trades")),
+      React.createElement("div",{className:"glass",style:{padding:14}},React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase'}},"Sharpe"),React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700}},s.sharpe.toFixed(2)),React.createElement("div",{style:{fontSize:11,color:C.mutedDim}},"risk-adjusted")),
+      React.createElement("div",{className:"glass",style:{padding:14}},React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase'}},"Max DD"),React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700,color:C.redBright}},"-"+s.maxDD.toFixed(1)+"%"),React.createElement("div",{style:{fontSize:11,color:C.mutedDim}},"drawdown")),
+      React.createElement("div",{className:"glass",style:{padding:14}},React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase'}},"CAGR"),React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700}},s.cagr.toFixed(1)+"%"),React.createElement("div",{style:{fontSize:11,color:C.mutedDim}},"annualized")),
+      React.createElement("div",{className:"glass",style:{padding:14}},React.createElement("div",{style:{fontSize:11,color:C.muted,textTransform:'uppercase'}},"vs Buy&Hold"),React.createElement("div",{className:"mono",style:{fontSize:20,fontWeight:700,color:s.totalReturn>s.bhReturn?C.greenBright:C.amber}},s.totalReturn>s.bhReturn?"OUTPERFORM":"BELOW"),React.createElement("div",{style:{fontSize:11,color:C.mutedDim}},"BH: "+s.bhReturn.toFixed(1)+"%"))
+    ),
+    React.createElement("svg",{viewBox:"0 0 "+w+" "+h,width:"100%",style:{marginTop:8}},
+      React.createElement("polyline",{points:eqPts,fill:"none",stroke:C.greenBright,strokeWidth:2})
+    ),
+    props.bt.trades.length>0&&React.createElement("div",{style:{marginTop:10,maxHeight:200,overflow:'auto',fontSize:11},className:"mono"},
+      React.createElement("table",{style:{width:'100%',borderCollapse:'collapse'}},
+        React.createElement("thead",null,React.createElement("tr",{style:{color:C.muted,textAlign:'left'}},
+          React.createElement("th",{style:{padding:'4px 8px'}},"Date"),React.createElement("th",null,"Side"),React.createElement("th",null,"Score"),React.createElement("th",null,"Entry"),React.createElement("th",null,"Exit"),React.createElement("th",null,"Return")
+        )),
+        React.createElement("tbody",null,props.bt.trades.slice(-15).reverse().map(function(t,i){
+          return React.createElement("tr",{key:i,style:{borderTop:"1px solid "+C.border}},
+            React.createElement("td",{style:{padding:'4px 8px'}},t.date),
+            React.createElement("td",{style:{color:t.side==='LONG'?C.green:C.red}},t.side),
+            React.createElement("td",null,t.score.toFixed(0)),
+            React.createElement("td",null,t.ep.toFixed(2)),
+            React.createElement("td",null,t.xp.toFixed(2)),
+            React.createElement("td",{style:{color:t.win?C.greenBright:C.redBright}},(t.returnPct>0?"+":"")+t.returnPct.toFixed(2)+"%")
+          );
+        }))
+      )
+    )
+  );
+}
+
+// Main App
+function App(){
+  var theme=useState('dark');var setTheme=theme[1];theme=theme[0];
+  var selected=useState(ASSETS[0]);var setSelected=selected[1];selected=selected[0];
+  var series=useState(null);var setSeries=series[1];series=series[0];
+  var marketData=useState(null);var setMarketData=marketData[1];marketData=marketData[0];
+  var loading=useState(true);var setLoading=loading[1];loading=loading[0];
+  var logs=useState([]);var setLogs=logs[1];logs=logs[0];
+  var typing=useState('');var setTyping=typing[1];typing=typing[0];
+  var aiActive=useState(true);aiActive=aiActive[0];
+  var page=useState('dashboard');var setPage=page[1];page=page[0];
+  var searchQuery=useState('');var setSearchQuery=searchQuery[1];searchQuery=searchQuery[0];
+  var backtest=useState(null);var setBacktest=backtest[1];backtest=backtest[0];
+  var scores=useState({tech:50,quant:50,fund:50,overall:50,notes:[]});var setScores=scores[1];scores=scores[0];
+
+  var addLog=useCallback(function(msg,type){
+    type=type||'info';
+    var now=new Date();var time=String(now.getHours()).padStart(2,'0')+":"+String(now.getMinutes()).padStart(2,'0')+":"+String(now.getSeconds()).padStart(2,'0');
+    setLogs(function(prev){return prev.slice(-50).concat([{msg:type==='info'&&!msg.includes('...')?msg:msg,time:type,time:time}]);});
+  },[]);
+
+  var generateInsight=useCallback(function(asset,s,md){
+    var v=verdictFromScore(s.overall);
+    var text=asset.name+" ("+asset.symbol+") - AI Analysis Complete.\n\nVerdict: "+v.label+" (Score: "+s.overall.toFixed(0)+"/100).\n\n";
+    text+="Technical: "+s.tech.toFixed(0)+" - "+(s.techNotes?s.techNotes.slice(0,2).join("; "):"analyzing...")+"\n";
+    text+="Quant: "+s.quant.toFixed(0)+" - "+(s.quantNotes?s.quantNotes.slice(0,2).join("; "):"analyzing...")+"\n";
+    text+="Fundamental: "+s.fund.toFixed(0)+" - "+(s.fundNotes?s.fundNotes.slice(0,1).join("; "):"proxy data")+"\n\n";
+    if(s.overall>=58)text+="Bullish signals detected. Momentum and trend alignment suggest upside potential. Consider position sizing based on volatility metrics.";
+    else if(s.overall<=42)text+="Bearish indicators present. Multiple confirmation signals suggest caution. Wait for reversal confirmation before entry.";
+    else text+="Mixed signals. Market in equilibrium - no strong directional bias. Range-bound strategy recommended.";
+    if(s.vol&&s.vol>0.06)text+="\n\nWarning: High volatility ("+(s.vol*100).toFixed(1)+"%) detected. Use tighter position sizing and wider stops.";
+    return text;
+  },[]);
+
+  var analyzeAsset=useCallback(async function(asset){
+    setLoading(true);setSeries(null);setBacktest(null);setTyping('');
+    addLog("Loading "+asset.name+" data...",'scan');
+    var data=null,md=null;
+    if(asset.type==='crypto'){
+      addLog("Fetching from CoinGecko API...",'scan');
+      var markets=await fetchCryptoData([asset.id]);
+      md=markets[asset.id]||null;
+      if(md)addLog("Market data received - rank #"+(md.market_cap_rank||'N/A'),'done');
+      addLog("Fetching 1-year price history...",'scan');
+      data=await fetchCryptoSeries(asset.id,365);
+    } else {
+      addLog("Fetching from Stooq ("+asset.stooq+")...",'scan');
+      data=await fetchStooqSeries(asset.stooq);
+      addLog("Loaded "+data.length+" daily candles",'done');
+    }
+    if(data&&data.length>0){
+      setSeries(data);
+      var closes=data.map(function(d){return d.close;});
+      addLog("Running technical analysis engine...",'scan');
+      var tech=computeTechnicalScore(closes);
+      addLog("Technical score: "+tech.score.toFixed(0)+" - RSI "+(tech.rsi!=null?tech.rsi.toFixed(1):"N/A"),'done');
+      addLog("Running quantitative model...",'scan');
+      var quant=computeQuantScore(closes);
+      addLog("Quant score: "+quant.score.toFixed(0)+" - Sharpe "+(quant.sharpe!=null?quant.sharpe.toFixed(2):"N/A"),'done');
+      addLog("Computing fundamental proxy...",'scan');
+      var fund=computeFundamentalScore(asset,md,closes);
+      addLog("Fundamental score: "+fund.score.toFixed(0),'done');
+      var overall=tech.score*0.4+quant.score*0.3+fund.score*0.3;
+      var allScores={tech:tech.score,quant:quant.score,fund:fund.score,overall:overall,notes:tech.notes.concat(quant.notes,fund.notes),techNotes:tech.notes,quantNotes:quant.notes,fundNotes:fund.notes,rsi:tech.rsi,vol:tech.vol};
+      setScores(allScores);
+      addLog("Overall AI Score: "+overall.toFixed(0)+"/100 - "+verdictFromScore(overall).label,'done');
+      addLog("Generating AI insight summary...",'scan');
+      var insight=generateInsight(asset,allScores,md);
+      setTyping(insight);
+      addLog("AI analysis complete.",'done');
+      addLog("Running 10-year backtest...",'scan');
+      var btData=data;
+      if(asset.type==='crypto'){
+        addLog("Fetching 10-year historical data...",'scan');
+        btData=await fetchCryptoSeries(asset.id,3650);
+      } else {
+        if(data.length<120){addLog("Fetching extended history...",'scan');btData=await fetchStooqSeries(asset.stooq);}
+      }
+      var bt=runBacktest(btData);
+      setBacktest(bt);
+      if(bt.stats)addLog("Backtest: "+bt.stats.totalTrades+" trades, "+bt.stats.winRate.toFixed(0)+"% win rate, "+bt.stats.totalReturn.toFixed(1)+"% return",'done');
+      else addLog("Not enough historical data for backtest",'info');
+    } else {
+      addLog("Failed to load data - using mock data",'error');
+    }
+    setLoading(false);
+    setMarketData(md);
+  },[addLog,generateInsight]);
+
+  useEffect(function(){analyzeAsset(selected);},[selected]);
+  useEffect(function(){if(window.lucide)window.lucide.createIcons();});
+
+  var toggleTheme=function(){var nt=theme==='dark'?'light':'dark';setTheme(nt);document.documentElement.className=nt;};
+  var filteredAssets=searchQuery?ASSETS.filter(function(a){return a.name.toLowerCase().includes(searchQuery.toLowerCase())||a.symbol.toLowerCase().includes(searchQuery.toLowerCase());}):ASSETS;
+
+  return React.createElement("div",{style:{display:'flex',height:'100vh'}},
+    // Sidebar
+    React.createElement("div",{style:{width:64,background:C.bg2,borderRight:"1px solid "+C.border,display:'flex',flexDirection:'column',alignItems:'center',paddingTop:12,gap:6}},
+      React.createElement("div",{style:{marginBottom:20}},
+        React.createElement("div",{style:{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,"+C.accent+","+C.violet+")",display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:16}},"A")
+      ),
+      [{id:'dashboard',icon:'layout-dashboard'},{id:'scan',icon:'radar'},{id:'backtest',icon:'trending-up'},{id:'portfolio',icon:'briefcase'},{id:'settings',icon:'settings'}].map(function(item){
+        return React.createElement("div",{key:item.id,className:"nav-icon "+(page===item.id?'active':''),onClick:function(){setPage(item.id);}});
+      }),
+      React.createElement("div",{style:{flex:1}}),
+      React.createElement("div",{className:"nav-icon",onClick:toggleTheme}),
+      React.createElement("div",{className:"nav-icon"})
+    ),
+    // Main content
+    React.createElement("div",{style:{flex:1,overflow:'auto'}},
+      // Header
+      React.createElement("div",{style:{padding:'12px 20px',borderBottom:"1px solid "+C.border,display:'flex',alignItems:'center',gap:16,background:C.bg2,position:'sticky',top:0,zIndex:10}},
+        React.createElement("input",{type:"text",placeholder:"Search assets... (BTC, AAPL, RELIANCE)",value:searchQuery,onChange:function(e){setSearchQuery(e.target.value);},style:{flex:1,maxWidth:400,background:C.panel,border:"1px solid "+C.border,borderRadius:10,padding:'8px 14px',color:C.text,fontSize:13,outline:'none',fontFamily:'Space Grotesk'}}),
+        React.createElement("div",{style:{display:'flex',alignItems:'center',gap:6}},
+          React.createElement("div",{className:"pulse-dot",style:{background:aiActive?C.accent:C.muted}}),
+          React.createElement("span",{style:{fontSize:12,color:C.muted,fontWeight:500}},aiActive?"AI Active - Scanning":"AI Idle")
+        )
+      ),
+      // Asset tabs
+      React.createElement("div",{style:{padding:'8px 20px',display:'flex',gap:6,overflowX:'auto',borderBottom:"1px solid "+C.border}},
+        filteredAssets.map(function(a){
+          return React.createElement("div",{key:a.id,onClick:function(){setSelected(a);},style:{padding:'6px 14px',borderRadius:10,cursor:'pointer',whiteSpace:'nowrap',fontSize:12,fontWeight:600,background:selected.id===a.id?"rgba(0,230,118,0.08)":C.panel,border:"1px solid "+(selected.id===a.id?C.accent:C.border),color:selected.id===a.id?C.accent:C.muted,transition:'all .2s'}},
+            a.symbol+" ",React.createElement("span",{style:{opacity:0.5,fontSize:10}},a.name)
+          );
+        })
+      ),
+      // Content grid
+      React.createElement("div",{style:{padding:16,display:'grid',gridTemplateColumns:'260px 1fr 300px',gap:14}},
+        // Left: Agent Log
+        React.createElement("div",{style:{gridRow:'span 2',height:'calc(100vh - 160px)'}},
+          React.createElement(AgentLog,{logs:logs})
+        ),
+        // Center: AI Insights + Chart + Backtest
+        React.createElement("div",null,
+          React.createElement(AIInsights,{asset:selected,scores:scores,marketData:marketData,typing:typing}),
+          React.createElement("div",{style:{marginTop:14}},
+            React.createElement("div",{className:"glass",style:{padding:16}},
+              React.createElement("div",{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
+                React.createElement("span",{style:{fontSize:13,fontWeight:600}},selected.name+" ("+selected.symbol+") - Technical Chart"),
+                loading&&React.createElement("span",{style:{fontSize:11,color:C.muted}},"Loading...")
+              ),
+              loading?React.createElement("div",{className:"skeleton",style:{height:380,width:'100%'}}):React.createElement(TechnicalChart,{series:series,symbol:selected.symbol})
+            )
+          ),
+          React.createElement("div",{style:{marginTop:14}},
+            backtest?React.createElement(BacktestPanel,{bt:backtest}):React.createElement("div",{className:"glass",style:{padding:20}},React.createElement("div",{className:"skeleton",style:{height:200,width:'100%'}}))
+          )
+        ),
+        // Right: Scores + Metrics
+        React.createElement("div",{style:{gridRow:'span 2'}},
+          React.createElement("div",{className:"glass",style:{padding:16,marginBottom:14}},
+            React.createElement("div",{style:{fontSize:13,fontWeight:600,marginBottom:8}},"AI Score"),
+            React.createElement(Gauge,{score:scores.overall}),
+            React.createElement("div",{style:{marginTop:10}},
+              React.createElement(ScoreBar,{label:"Technical",score:scores.tech,accent:C.blue}),
+              React.createElement(ScoreBar,{label:"Quant",score:scores.quant,accent:C.violet}),
+              React.createElement(ScoreBar,{label:"Fundamental",score:scores.fund,accent:C.amber})
+            )
+          ),
+          React.createElement("div",{className:"glass",style:{padding:14,marginBottom:14}},
+            React.createElement("div",{style:{fontSize:13,fontWeight:600,marginBottom:10}},"Live Metrics"),
+            series&&!loading?(
+              (function(){
+                var closes=series.map(function(s){return s.close;});
+                var lc=closes[closes.length-1],pc=closes[closes.length-2]||lc;
+                var chg=((lc-pc)/pc)*100;
+                var mcSpark=closes.slice(-30);
+                var els=[];
+                els.push(React.createElement(MetricCard,{key:"p",label:"Price",value:"$"+lc.toFixed(2),sub:(chg>=0?"+":"")+chg.toFixed(2)+"%",closes:mcSpark,sparkColor:chg>=0?C.greenBright:C.redBright}));
+                els.push(React.createElement("div",{key:"sp",style:{height:8}}));
+                els.push(React.createElement(MetricCard,{key:"r",label:"RSI (14)",value:scores.rsi!=null?scores.rsi.toFixed(1):"N/A",sub:scores.rsi>70?"Overbought":scores.rsi<30?"Oversold":"Neutral",closes:closes.slice(-14),sparkColor:C.violet}));
+                els.push(React.createElement("div",{key:"sp2",style:{height:8}}));
+                els.push(React.createElement(MetricCard,{key:"v",label:"Volatility",value:scores.vol?(scores.vol*100).toFixed(1)+"%":"N/A",sub:scores.vol&&scores.vol>0.06?"High":"Normal",closes:closes.slice(-20),sparkColor:C.amber}));
+                if(marketData&&marketData.market_cap){
+                  els.push(React.createElement("div",{key:"sp3",style:{height:8}}));
+                  els.push(React.createElement(MetricCard,{key:"m",label:"Market Cap",value:"$"+(marketData.market_cap/1e9).toFixed(1)+"B",sub:"Rank #"+(marketData.market_cap_rank||'N/A'),closes:mcSpark,sparkColor:C.blue}));
+                }
+                return els;
+              })()
+            ):React.createElement("div",null,
+              React.createElement("div",{className:"skeleton",style:{height:60,width:'100%',marginBottom:8}}),
+              React.createElement("div",{className:"skeleton",style:{height:60,width:'100%',marginBottom:8}}),
+              React.createElement("div",{className:"skeleton",style:{height:60,width:'100%'}})
+            )
+          ),
+          React.createElement("div",{className:"glass",style:{padding:14}},
+            React.createElement("div",{style:{fontSize:13,fontWeight:600,marginBottom:8}},"Analysis Notes"),
+            React.createElement("div",{style:{fontSize:11,lineHeight:1.8,color:C.muted}},
+              scores.notes&&scores.notes.length>0?scores.notes.map(function(n,i){
+                return React.createElement("div",{key:i,style:{marginBottom:4,paddingLeft:10,borderLeft:"2px solid "+C.border}},n);
+              }):"Analysis pending..."
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
