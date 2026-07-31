@@ -7,7 +7,7 @@ Add new brokers here by extending SUPPORTED_BROKERS and the create_broker() func
 from config import DEFAULT_WATCHLIST
 
 
-SUPPORTED_BROKERS = ["Zerodha", "Upstox", "Angel One"]
+SUPPORTED_BROKERS = ["Zerodha", "Upstox", "Angel One", "Groww"]
 
 
 def create_broker(broker_name: str, secrets: dict):
@@ -41,6 +41,13 @@ def create_broker(broker_name: str, secrets: dict):
             client_code=secrets["angelone"]["client_code"],
             password=secrets["angelone"]["password"],
             totp_secret=secrets["angelone"]["totp_secret"],
+        )
+
+    elif broker_name in ("groww",):
+        from brokers.groww import GrowwBroker
+        return GrowwBroker(
+            api_key=secrets["groww"]["api_key"],
+            totp_secret=secrets["groww"].get("totp_secret", ""),
         )
 
     else:

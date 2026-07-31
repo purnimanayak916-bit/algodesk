@@ -163,6 +163,19 @@ if "Connect" in page:
                     st.rerun()
                 else:
                     st.error("Login failed. Check your TOTP and credentials.")
+    # ── Groww login ──
+    elif broker_choice == "Groww":
+        st.markdown("### Groww Login")
+        st.markdown("Direct login — enter your TOTP below. Generate your API key from groww.in/trade-api/api-keys")
+        totp_input = st.text_input("Enter 6-digit TOTP:", max_chars=6, key="groww_totp")
+        if st.button("Complete Login", key="groww_login") and totp_input:
+            with st.spinner("Logging in..."):
+                if broker.complete_login(totp=totp_input):
+                    st.success("Logged in to Groww!")
+                    st.rerun()
+                else:
+                    st.error("Login failed. Check your TOTP and API key.")
+
 
 
 # ═══════════════════════════════════════════════════════════════════════
