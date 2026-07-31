@@ -22,6 +22,7 @@ from strategy import generate_signals, latest_signal
 from backtester import Backtester
 from paper_trader import PaperTrader
 from telegram_alert import send_telegram_message
+from ai_analysis import detect_all_patterns, render_ai_chart, run_sma_backtest, get_live_metrics, generate_simulated_data
 from tradingview import (
     advanced_chart, symbol_info, technical_analysis,
     market_overview, ticker_tape, mini_chart, render as render_tv
@@ -142,7 +143,7 @@ st.session_state["tv_enabled"] = st.sidebar.checkbox(
 )
 st.sidebar.markdown("---")
 
-pages = ["Dashboard", "Charts", "Backtest",
+pages = ["AI Analysis", "Dashboard", "Charts", "Backtest",
          "Paper Trading", "Live Orders", "Settings", "Connect"]
 page = st.sidebar.radio("Navigate", pages)
 
@@ -472,6 +473,109 @@ if "Connect" in page:
 # ═══════════════════════════════════════════════════════════════════════
 # DASHBOARD PAGE
 # ═══════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════
+# AI ANALYSIS PAGE — Pattern Detection, Signal Log, Backtest
+# ═══════════════════════════════════════════════════════════════════════
+elif "AI Analysis" in page:
+    st.title("🤖 AI Pattern Analysis")
+    st.markdown("AI automatically detects patterns, draws trendlines, analyzes volume, and generates signals.")
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        ai_sym = st.selectbox("Select Symbol", st.session_state["watchlist"], key="ai_sym")
+    with col2:
+        ai_int = st.selectbox("Interval", list(INTERVAL_CHOICES.keys()), index=3, key="ai_int")
+    with col3:
+        ai_days = st.number_input("Lookback (days)", value=180, min_value=30, max_value=730, key="ai_days")
+
+    use_sim = st.checkbox("Use Simulated Data (no broker needed)", value=(not require_broker()) or is_tradingview(),
+                           help="If broker not connected, uses simulated data for demo")
+
+    if st.button("Run AI Analysis", type="primary"):
+        with st.spinner("AI analyzing patterns..."):
+            if use_sim or not require_broker():
+                df = generate_simulated_data(int(ai_days))
+                st.info("Using simulated data — connect a broker for real data")
+            else:
+                try:
+                    df = broker.get_historical(ai_sym.upper(),
+                                                interval=INTERVAL_CHOICES[ai_int], days=int(ai_days))
+                    if df.empty:
+                        st.warning("No data from broker. Using simulated data.")
+                        df = generate_simulated_data(int(ai_days))
+                except Exception as e:
+                    st.warning(f"Broker error: {e}. Using simulated data.")
+                    df = generate_simulated_data(int(ai_days))
+
+            signals, df_a = detect_all_patterns(df)
+            metrics = get_live_metrics(df_a)
+            bt = run_sma_backtest(df_a)
+
+            # Price + key metrics
+            cols = st.columns(5)
+            cols[0].metric("Price", f"\u20b9{metrics['price']:.2f}")
+            chg = metrics['change']
+            cols[1].metric("Change", f"{chg:+.2f}", f"{metrics['change_pct']:+.2f}%")
+            rsi_v = metrics['rsi']
+            cols[2].metric("RSI (14)", f"{rsi_v:.1f}" if rsi_v else "--")
+            cols[3].metric("Trend", metrics['trend'])
+            cols[4].metric("Signals", f"{len(signals)} found")
+
+            # Chart
+            st.markdown("### AI Chart — Candlestick + Pattern Detection")
+            fig = render_ai_chart(df_a, signals)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Detailed metrics
+            cols = st.columns(4)
+            cols[0].metric("SMA 9", f"\u20b9{metrics['sma9']:.2f}" if metrics['sma9'] else "--")
+            cols[1].metric("SMA 21", f"\u20b9{metrics['sma21']:.2f}" if metrics['sma21'] else "--")
+            cols[2].metric("Volatility", f"{metrics['volatility']:.2f}" if metrics['volatility'] else "--")
+            cols[3].metric("Support/Resist", "Active")
+
+            # Signal log
+            st.markdown("### AI Signal Log — Pattern Detection (kyun detect kiya)")
+            if signals:
+                sig_data = []
+                for s in reversed(signals[-20:]):
+                    sig_data.append({
+                        "Type": s['type'],
+                        "Price": f"\u20b9{s['price']:.2f}",
+                        "Date": s['date'],
+                        "Reason": s['reason']
+                    })
+                sig_df = pd.DataFrame(sig_data)
+                st.dataframe(sig_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Ab tak koi pattern detect nahi hua...")
+
+            # Backtest
+            st.markdown("### SMA9/SMA21 Crossover Backtest")
+            btc = bt
+            cols = st.columns(4)
+            cols[0].metric("Win Rate", f"{btc['win_rate']:.0f}%")
+            cols[1].metric("Trades", btc['total_trades'])
+            cols[2].metric("Net P/L", f"{btc['net_pnl']:+.2f}%")
+            cols[3].metric("Max DD", f"{btc['max_drawdown']:.2f}%")
+
+            if btc['trades']:
+                td = []
+                for t in btc['trades']:
+                    td.append({
+                        "Entry Date": str(t['entry_date'])[:10],
+                        "Exit Date": str(t['exit_date'])[:10],
+                        "Entry": f"\u20b9{t['entry']:.2f}",
+                        "Exit": f"\u20b9{t['exit']:.2f}",
+                        "Return": f"{t['return_pct']:+.2f}%",
+                        "Win": "Yes" if t['win'] else "No"
+                    })
+                st.dataframe(pd.DataFrame(td), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.warning("\u26a0\ufe0f Yeh sirf technical pattern analysis hai — trading advice nahi. Investment decisions ke liye SEBI-registered advisor se consult karein.")
+
+
 elif "Dashboard" in page:
     st.title("Dashboard")
 
