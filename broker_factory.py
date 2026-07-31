@@ -7,7 +7,7 @@ Add new brokers here by extending SUPPORTED_BROKERS and the create_broker() func
 from config import DEFAULT_WATCHLIST
 
 
-SUPPORTED_BROKERS = ["Zerodha", "Upstox", "Angel One", "Groww"]
+SUPPORTED_BROKERS = ["Zerodha", "Upstox", "Angel One", "Groww", "TradingView"]
 
 
 def create_broker(broker_name: str, secrets: dict):
@@ -49,6 +49,10 @@ def create_broker(broker_name: str, secrets: dict):
             api_key=secrets["groww"]["api_key"],
             totp_secret=secrets["groww"].get("totp_secret", ""),
         )
+
+    elif broker_name in ("tradingview", "tv"):
+        from brokers.tradingview import TradingViewBroker
+        return TradingViewBroker()
 
     else:
         raise ValueError(

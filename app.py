@@ -2,9 +2,11 @@
 app.py
 AlgoDesk — Multi-Broker Stock Trading Dashboard
 Main Streamlit application with broker selector and all pages.
+Supports: Zerodha, Upstox, Angel One, Groww, TradingView (charts only).
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -20,6 +22,10 @@ from strategy import generate_signals, latest_signal
 from backtester import Backtester
 from paper_trader import PaperTrader
 from telegram_alert import send_telegram_message
+from tradingview import (
+    advanced_chart, symbol_info, technical_analysis,
+    market_overview, ticker_tape, mini_chart, render as render_tv
+)
 
 
 # ── Page config ─────────────────────────────────────────────────────
@@ -34,6 +40,8 @@ def init_state():
         "risk": DEFAULT_RISK.copy(),
         "strategy_params": STRATEGY_PARAMS.copy(),
         "paper_trader": PaperTrader(),
+        "tv_enabled": True,       # TradingView widgets on by default
+        "auto_loaded": False,      # Dashboard auto-load flag
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -41,7 +49,8 @@ def init_state():
 
 init_state()
 
-# ── Sidebar: broker selector ─────────────────────────────────────────
+
+# ── Sidebar ─────────────────────────────────────────────────────────
 st.sidebar.title(APP_TITLE)
 st.sidebar.markdown("---")
 
@@ -54,20 +63,26 @@ broker_choice = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 
+# TradingView toggle
+st.session_state["tv_enabled"] = st.sidebar.checkbox(
+    "TradingView Charts", value=st.session_state.get("tv_enabled", True),
+    help="Enable TradingView chart widgets on Dashboard and Charts pages"
+)
+
+st.sidebar.markdown("---")
+
 # Navigation
 pages = ["Dashboard", "Charts", "Backtest",
          "Paper Trading", "Live Orders", "Settings", "Connect"]
 page = st.sidebar.radio("Navigate", pages)
 
 
-# ── Helper: get broker connection ────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────
 def get_broker():
-    """Return the current broker instance from session state."""
     return st.session_state.get("broker")
 
 
 def require_broker():
-    """Show a warning if not connected, return False."""
     b = get_broker()
     if b is None or not b.is_connected:
         st.warning("Not connected. Go to the Connect page to log in.")
@@ -75,16 +90,22 @@ def require_broker():
     return True
 
 
+def is_tradingview():
+    """Check if current broker is TradingView (display-only)."""
+    b = get_broker()
+    return b is not None and b.name == "TradingView"
+
+
 def try_create_broker():
-    """Try to instantiate the selected broker from secrets."""
     if st.session_state.get("broker_name") != broker_choice:
         try:
             secrets = st.secrets
             b = create_broker(broker_choice, dict(secrets))
             st.session_state["broker"] = b
             st.session_state["broker_name"] = broker_choice
+            st.session_state["auto_loaded"] = False
             return b
-        except Exception as e:
+        except Exception:
             st.session_state["broker"] = None
             return None
     return st.session_state.get("broker")
@@ -93,31 +114,66 @@ def try_create_broker():
 broker = try_create_broker()
 
 
+def interval_to_tv(interval_label: str) -> str:
+    """Map our interval labels to TradingView interval codes."""
+    return {
+        "5 minute": "5",
+        "15 minute": "15",
+        "1 hour": "60",
+        "1 day": "D",
+    }.get(interval_label, "D")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # CONNECT PAGE
 # ═══════════════════════════════════════════════════════════════════════
 if "Connect" in page:
-    st.title("Connect to Broker")
+    st.title("Connect")
+
+    # ── Broker connection section ──
+    st.markdown("### Broker Connection")
     st.markdown(f"**Selected broker:** {broker_choice}")
 
+    # TradingView — no API key needed
+    if broker_choice == "TradingView":
+        st.success("TradingView is ready — no API key needed!")
+        st.markdown(
+            "TradingView provides free chart widgets and market data. "
+            "No login or API key required. "
+            "Go to the **Dashboard** to see live charts and market overview."
+        )
+        st.markdown(
+            "For trading (live orders), connect a real broker: "
+            "**Zerodha**, **Upstox**, **Angel One**, or **Groww**."
+        )
+        st.stop()
+
+    # Real brokers
     if broker is None:
         st.error(
             f"No secrets found for **{broker_choice}**. "
             f"Add your API keys to `.streamlit/secrets.toml` and restart."
         )
-        st.info("See `secrets.toml.example` for the required fields.")
+        with st.expander("Required fields"):
+            st.code(
+                f"[{broker_choice.lower().replace(' ', '')}]\n"
+                f"api_key = \"your_api_key\"\n"
+                f"# See secrets.toml.example for full details",
+                language="toml"
+            )
         st.stop()
 
     if broker.is_connected:
         st.success(f"Connected to {broker.name}!")
-        st.markdown("You're all set. Head to the Dashboard to start trading.")
+        st.markdown("Head to the **Dashboard** to see live data and signals.")
         if st.button("Disconnect"):
             st.session_state["broker"] = None
             st.session_state["broker_name"] = None
+            st.session_state["auto_loaded"] = False
             st.rerun()
         st.stop()
 
-    # ── Zerodha login ──
+    # ── Zerodha ──
     if broker_choice == "Zerodha":
         st.markdown("### Zerodha Login")
         st.markdown("1. Click the login URL below.\n2. Authorize on Kite.\n3. Copy the `request_token` from the redirect URL.")
@@ -134,7 +190,7 @@ if "Connect" in page:
                 else:
                     st.error("Login failed. Check your request_token and API keys.")
 
-    # ── Upstox login ──
+    # ── Upstox ──
     elif broker_choice == "Upstox":
         st.markdown("### Upstox Login")
         st.markdown("1. Click the login URL below.\n2. Authorize on Upstox.\n3. Copy the `auth_code` from the redirect URL.")
@@ -151,7 +207,7 @@ if "Connect" in page:
                 else:
                     st.error("Login failed. Check your auth code and API keys.")
 
-    # ── Angel One login ──
+    # ── Angel One ──
     elif broker_choice == "Angel One":
         st.markdown("### Angel One Login")
         st.markdown("Direct login — enter your TOTP below. Make sure TOTP-based API login is enabled in the Angel One app.")
@@ -163,7 +219,8 @@ if "Connect" in page:
                     st.rerun()
                 else:
                     st.error("Login failed. Check your TOTP and credentials.")
-    # ── Groww login ──
+
+    # ── Groww ──
     elif broker_choice == "Groww":
         st.markdown("### Groww Login")
         st.markdown("Direct login — enter your TOTP below. Generate your API key from groww.in/trade-api/api-keys")
@@ -176,6 +233,49 @@ if "Connect" in page:
                 else:
                     st.error("Login failed. Check your TOTP and API key.")
 
+    # ── API key info section ──
+    st.markdown("---")
+    st.markdown("### How to get API keys")
+
+    with st.expander("Zerodha"):
+        st.markdown(
+            "1. Go to developers.kite.trade\n"
+            "2. Create an app (Rs 2,000/month subscription)\n"
+            "3. Note API key and secret\n"
+            "4. Set redirect URL to your deployed app's URL"
+        )
+
+    with st.expander("Upstox"):
+        st.markdown(
+            "1. Go to upstox.com/developer\n"
+            "2. Create an app (free)\n"
+            "3. Note API key and secret\n"
+            "4. Set redirect URI to match UPSTOX_REDIRECT_URI"
+        )
+
+    with st.expander("Angel One"):
+        st.markdown(
+            "1. Go to smartapi.angelbroking.com\n"
+            "2. Create an app (free)\n"
+            "3. Note API key\n"
+            "4. Enable TOTP-based login in Angel One app under API settings"
+        )
+
+    with st.expander("Groww"):
+        st.markdown(
+            "1. Go to groww.in/trade-api/api-keys\n"
+            "2. Log in to your Groww account\n"
+            "3. Click 'Generate API Key'\n"
+            "4. Copy API Key and Secret\n"
+            "5. Set up TOTP in Google Authenticator"
+        )
+
+    with st.expander("TradingView (free, no API key)"):
+        st.markdown(
+            "TradingView widgets are free to embed. No API key, no login.\n"
+            "Provides live charts, technical analysis, and market overview.\n"
+            "Trading is NOT supported — connect a real broker for that."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -184,7 +284,53 @@ if "Connect" in page:
 elif "Dashboard" in page:
     st.title("Dashboard")
 
+    watchlist = st.session_state["watchlist"]
+
+    # ── TradingView ticker tape (always shows if enabled) ──
+    if st.session_state.get("tv_enabled"):
+        tv_symbols = [(s, "NSE") for s in watchlist]
+        render_tv(ticker_tape(tv_symbols), height=50)
+
+    st.markdown("---")
+
+    # ── TradingView mode ──
+    if is_tradingview():
+        st.markdown("### Market Overview")
+        render_tv(market_overview([(s, "NSE") for s in watchlist], height=400), height=420)
+
+        st.markdown("---")
+        st.markdown("### Technical Analysis")
+
+        tv_sym = st.selectbox("Select Symbol", watchlist, key="tv_dash_sym")
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            render_tv(advanced_chart(tv_sym, "NSE", "D", height=400), height=420)
+        with col2:
+            render_tv(technical_analysis(tv_sym, "NSE", height=400), height=420)
+
+        st.markdown("---")
+        st.markdown("### Mini Charts — Watchlist")
+        cols = st.columns(3)
+        for i, sym in enumerate(watchlist[:6]):
+            with cols[i % 3]:
+                st.markdown(f"**{sym}**")
+                render_tv(mini_chart(sym, "NSE", height=180), height=200)
+
+        st.markdown("---")
+        st.info(
+            "TradingView mode shows live charts and market data. "
+            "To place trades, connect a broker (Zerodha, Upstox, Angel One, Groww) "
+            "from the Connect page."
+        )
+        st.stop()
+
+    # ── Broker mode (real brokers) ──
     if not require_broker():
+        # Still show TradingView widgets if enabled
+        if st.session_state.get("tv_enabled"):
+            st.markdown("---")
+            st.markdown("### Market Overview (TradingView)")
+            render_tv(market_overview([(s, "NSE") for s in watchlist], height=400), height=420)
         st.stop()
 
     broker = get_broker()
@@ -193,11 +339,12 @@ elif "Dashboard" in page:
     with st.expander("Watchlist (click to edit)"):
         new_list = st.text_area(
             "Symbols (comma-separated)",
-            value=", ".join(st.session_state["watchlist"]),
+            value=", ".join(watchlist),
         )
         if st.button("Update Watchlist"):
             symbols = [s.strip().upper() for s in new_list.split(",") if s.strip()]
             st.session_state["watchlist"] = symbols
+            st.session_state["auto_loaded"] = False
             st.rerun()
 
     interval_label = st.selectbox(
@@ -207,9 +354,46 @@ elif "Dashboard" in page:
 
     st.markdown("---")
 
-    # Signal scan
+    # ── Auto-load: fetch quotes on first visit ──
+    if not st.session_state.get("auto_loaded", False):
+        with st.spinner("Loading market data..."):
+            quote_data = []
+            for symbol in watchlist:
+                try:
+                    q = broker.get_quote(symbol)
+                    quote_data.append({
+                        "Symbol": symbol,
+                        "LTP": q["ltp"],
+                        "Open": q["open"],
+                        "High": q["high"],
+                        "Low": q["low"],
+                        "Close": q["close"],
+                    })
+                except Exception:
+                    quote_data.append({
+                        "Symbol": symbol, "LTP": "—",
+                        "Open": "—", "High": "—", "Low": "—", "Close": "—",
+                    })
+            if quote_data:
+                st.session_state["auto_quotes"] = pd.DataFrame(quote_data)
+            st.session_state["auto_loaded"] = True
+
+    # Show auto-loaded quotes
+    if st.session_state.get("auto_quotes") is not None and not st.session_state["auto_quotes"].empty:
+        st.markdown("### Live Quotes (auto-loaded)")
+        st.dataframe(st.session_state["auto_quotes"], use_container_width=True, hide_index=True)
+
+    # TradingView mini charts alongside broker data
+    if st.session_state.get("tv_enabled"):
+        st.markdown("---")
+        st.markdown("### TradingView Charts")
+        tv_sym = st.selectbox("Select Symbol for Chart", watchlist, key="tv_dash_chart")
+        render_tv(advanced_chart(tv_sym, "NSE", interval_to_tv(interval_label), height=450), height=470)
+
+    st.markdown("---")
+
+    # ── Signal scan ──
     st.subheader("Live Signals")
-    watchlist = st.session_state["watchlist"]
 
     if st.button("Scan Watchlist"):
         signal_data = []
@@ -245,7 +429,6 @@ elif "Dashboard" in page:
             sig_df = pd.DataFrame(signal_data)
             st.dataframe(sig_df, use_container_width=True)
 
-            # Telegram alert for BUY/SELL signals
             tg = dict(st.secrets.get("telegram", {})) if "telegram" in st.secrets else {}
             bot_token = tg.get("bot_token", "")
             chat_id = tg.get("chat_id", "")
@@ -263,7 +446,7 @@ elif "Dashboard" in page:
     # Quick quote
     st.markdown("---")
     st.subheader("Quick Quote")
-    symbol = st.selectbox("Symbol", st.session_state["watchlist"])
+    symbol = st.selectbox("Symbol", watchlist, key="dq_sym")
     if st.button("Get Quote"):
         try:
             q = broker.get_quote(symbol)
@@ -276,6 +459,12 @@ elif "Dashboard" in page:
         except Exception as e:
             st.error(f"Error fetching quote: {e}")
 
+    # TradingView technical analysis widget
+    if st.session_state.get("tv_enabled"):
+        st.markdown("---")
+        st.markdown("### Technical Analysis (TradingView)")
+        render_tv(technical_analysis(symbol, "NSE", height=400), height=420)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # CHARTS PAGE
@@ -283,24 +472,51 @@ elif "Dashboard" in page:
 elif "Charts" in page:
     st.title("Charts")
 
+    watchlist = st.session_state["watchlist"]
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        chart_symbol = st.text_input("Symbol", value=watchlist[0])
+    with col2:
+        chart_interval = st.selectbox("Interval", list(INTERVAL_CHOICES.keys()), index=3)
+    with col3:
+        days = st.number_input("Lookback (days)", value=180, min_value=30, max_value=730)
+
+    # ── TradingView chart (always available if enabled) ──
+    if st.session_state.get("tv_enabled"):
+        st.markdown("### TradingView Live Chart")
+        render_tv(advanced_chart(
+            chart_symbol.upper(), "NSE",
+            interval_to_tv(chart_interval), height=500
+        ), height=520)
+
+        st.markdown("---")
+        col_t1, col_t2 = st.columns([2, 1])
+        with col_t1:
+            st.markdown("### Technical Analysis")
+            render_tv(technical_analysis(chart_symbol.upper(), "NSE", height=400), height=420)
+        with col_t2:
+            st.markdown("### Symbol Info")
+            render_tv(symbol_info(chart_symbol.upper(), "NSE"), height=420)
+
+        st.markdown("---")
+
+    # ── Broker-based Plotly chart (requires broker connection) ──
+    if is_tradingview():
+        st.info("Broker-based charts require a real broker connection. TradingView charts are shown above.")
+        st.stop()
+
     if not require_broker():
         st.stop()
 
     broker = get_broker()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        symbol = st.text_input("Symbol", value=st.session_state["watchlist"][0])
-    with col2:
-        interval_label = st.selectbox("Interval", list(INTERVAL_CHOICES.keys()), index=3)
-        interval = INTERVAL_CHOICES[interval_label]
-    with col3:
-        days = st.number_input("Lookback (days)", value=180, min_value=30, max_value=730)
-
-    if st.button("Load Chart"):
+    st.markdown("### Broker Chart (Plotly)")
+    if st.button("Load Plotly Chart"):
         with st.spinner("Fetching data..."):
             try:
-                df = broker.get_historical(symbol.upper(), interval=interval, days=days)
+                df = broker.get_historical(chart_symbol.upper(),
+                                            interval=INTERVAL_CHOICES[chart_interval],
+                                            days=days)
                 if df.empty:
                     st.warning("No data returned.")
                     st.stop()
@@ -308,65 +524,64 @@ elif "Charts" in page:
                 st.error(f"Error fetching data: {e}")
                 st.stop()
 
-        df = generate_signals(df, st.session_state["strategy_params"])
-        df = add_all_indicators(df, st.session_state["strategy_params"])
+            df = generate_signals(df, st.session_state["strategy_params"])
+            df = add_all_indicators(df, st.session_state["strategy_params"])
 
-        # Candlestick + volume chart
-        fig = make_subplots(
-            rows=3, cols=1, shared_xaxes=True,
-            row_heights=[0.6, 0.2, 0.2],
-            vertical_spacing=0.03,
-            subplot_titles=("Price & SMA", "Volume", "RSI")
-        )
+            fig = make_subplots(
+                rows=3, cols=1, shared_xaxes=True,
+                row_heights=[0.6, 0.2, 0.2],
+                vertical_spacing=0.03,
+                subplot_titles=("Price & SMA", "Volume", "RSI")
+            )
 
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df["open"], high=df["high"],
-            low=df["low"], close=df["close"], name="OHLC"
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["sma_fast"], name="SMA Fast",
-            line=dict(color="blue", width=1.5)
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["sma_slow"], name="SMA Slow",
-            line=dict(color="orange", width=1.5)
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["bb_upper"], name="BB Upper",
-            line=dict(color="gray", dash="dash", width=1), opacity=0.5
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["bb_lower"], name="BB Lower",
-            line=dict(color="gray", dash="dash", width=1), opacity=0.5
-        ), row=1, col=1)
+            fig.add_trace(go.Candlestick(
+                x=df.index, open=df["open"], high=df["high"],
+                low=df["low"], close=df["close"], name="OHLC"
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["sma_fast"], name="SMA Fast",
+                line=dict(color="blue", width=1.5)
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["sma_slow"], name="SMA Slow",
+                line=dict(color="orange", width=1.5)
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["bb_upper"], name="BB Upper",
+                line=dict(color="gray", dash="dash", width=1), opacity=0.5
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["bb_lower"], name="BB Lower",
+                line=dict(color="gray", dash="dash", width=1), opacity=0.5
+            ), row=1, col=1)
 
-        colors = ["green" if c >= o else "red" for c, o in zip(df["close"], df["open"])]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df["volume"], name="Volume",
-            marker_color=colors, opacity=0.7
-        ), row=2, col=1)
+            colors = ["green" if c >= o else "red" for c, o in zip(df["close"], df["open"])]
+            fig.add_trace(go.Bar(
+                x=df.index, y=df["volume"], name="Volume",
+                marker_color=colors, opacity=0.7
+            ), row=2, col=1)
 
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["rsi"], name="RSI",
-            line=dict(color="purple", width=1.5)
-        ), row=3, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["rsi"], name="RSI",
+                line=dict(color="purple", width=1.5)
+            ), row=3, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
 
-        fig.update_layout(
-            height=800, xaxis_rangeslider_visible=False,
-            title_text=f"{symbol.upper()} — {interval_label}"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                height=800, xaxis_rangeslider_visible=False,
+                title_text=f"{chart_symbol.upper()} — {chart_interval}"
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-        buys = df[df["signal"] == 1]
-        sells = df[df["signal"] == -1]
-        if not buys.empty:
-            st.markdown(f"**{len(buys)} BUY signals**")
-            st.dataframe(buys[["close", "rsi", "macd_hist", "sma_fast", "sma_slow"]].tail(10))
-        if not sells.empty:
-            st.markdown(f"**{len(sells)} SELL signals**")
-            st.dataframe(sells[["close", "rsi", "macd_hist", "sma_fast", "sma_slow"]].tail(10))
+            buys = df[df["signal"] == 1]
+            sells = df[df["signal"] == -1]
+            if not buys.empty:
+                st.markdown(f"**{len(buys)} BUY signals**")
+                st.dataframe(buys[["close", "rsi", "macd_hist", "sma_fast", "sma_slow"]].tail(10))
+            if not sells.empty:
+                st.markdown(f"**{len(sells)} SELL signals**")
+                st.dataframe(sells[["close", "rsi", "macd_hist", "sma_fast", "sma_slow"]].tail(10))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -374,6 +589,10 @@ elif "Charts" in page:
 # ═══════════════════════════════════════════════════════════════════════
 elif "Backtest" in page:
     st.title("Backtest")
+
+    if is_tradingview():
+        st.info("Backtesting requires a broker connection with historical data. Connect Zerodha, Upstox, Angel One, or Groww.")
+        st.stop()
 
     if not require_broker():
         st.stop()
@@ -439,6 +658,10 @@ elif "Backtest" in page:
 # ═══════════════════════════════════════════════════════════════════════
 elif "Paper Trading" in page:
     st.title("Paper Trading")
+
+    if is_tradingview():
+        st.info("Paper trading requires a broker connection. Connect Zerodha, Upstox, Angel One, or Groww.")
+        st.stop()
 
     if not require_broker():
         st.stop()
@@ -523,6 +746,10 @@ elif "Paper Trading" in page:
 # ═══════════════════════════════════════════════════════════════════════
 elif "Live Orders" in page:
     st.title("Live Orders")
+
+    if is_tradingview():
+        st.warning("Live orders require a real broker connection. TradingView is charting only.")
+        st.stop()
 
     if not require_broker():
         st.stop()
@@ -640,6 +867,17 @@ elif "Settings" in page:
     st.session_state["strategy_params"] = params
 
     st.markdown("---")
+    st.markdown("### TradingView Charts")
+    st.session_state["tv_enabled"] = st.checkbox(
+        "Enable TradingView widgets on Dashboard and Charts",
+        value=st.session_state.get("tv_enabled", True)
+    )
+    if st.session_state["tv_enabled"]:
+        st.success("TradingView charts are enabled. You'll see live TradingView widgets on the Dashboard and Charts pages.")
+    else:
+        st.info("TradingView charts are disabled. Enable to see live charts alongside broker data.")
+
+    st.markdown("---")
     st.markdown("### Telegram Alerts")
     tg = dict(st.secrets.get("telegram", {})) if "telegram" in st.secrets else {}
     st.text_input("Bot Token", value=tg.get("bot_token", ""), key="tg_token", type="password")
@@ -657,6 +895,7 @@ elif "Settings" in page:
     st.markdown("### About")
     st.info(
         f"**{APP_TITLE}**\n\n"
+        "Supported brokers: Zerodha, Upstox, Angel One, Groww, TradingView (charts only).\n\n"
         "A technical/analytical tool — not financial advice. "
         "Test thoroughly in Paper Trading and Backtest before using Live Orders."
     )
