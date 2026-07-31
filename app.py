@@ -475,11 +475,11 @@ if "Connect" in page:
 # ═══════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════
-# AI ANALYSIS PAGE — Pattern Detection, Signal Log, Backtest
+# AI ANALYSIS PAGE — Pattern Detection, Quant, Scoring, Backtest
 # ═══════════════════════════════════════════════════════════════════════
 elif "AI Analysis" in page:
-    st.title("🤖 AI Pattern Analysis")
-    st.markdown("AI automatically detects patterns, draws trendlines, analyzes volume, and generates signals.")
+    st.title("AI Pattern Analysis")
+    st.markdown("AI automatically detects patterns, draws trendlines, analyzes volume, runs deep quant, and generates signals.")
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
@@ -494,25 +494,33 @@ elif "AI Analysis" in page:
 
     if st.button("Run AI Analysis", type="primary"):
         with st.spinner("AI analyzing patterns..."):
+            from ai_analysis import (detect_all_patterns, render_ai_chart, run_sma_backtest,
+                get_live_metrics, generate_simulated_data, compute_technical_score,
+                compute_quant_score, compute_fundamental_score, verdict_from_score,
+                get_up_down_analysis, get_quant_narrative, get_all_quant_metrics,
+                render_gauge, render_returns_histogram)
+
             if use_sim or not require_broker():
                 df = generate_simulated_data(int(ai_days))
-                st.info("Using simulated data — connect a broker for real data")
             else:
                 try:
-                    df = broker.get_historical(ai_sym.upper(),
-                                                interval=INTERVAL_CHOICES[ai_int], days=int(ai_days))
+                    df = broker.get_historical(ai_sym.upper(), interval=INTERVAL_CHOICES[ai_int], days=int(ai_days))
                     if df.empty:
-                        st.warning("No data from broker. Using simulated data.")
                         df = generate_simulated_data(int(ai_days))
                 except Exception as e:
-                    st.warning(f"Broker error: {e}. Using simulated data.")
                     df = generate_simulated_data(int(ai_days))
 
             signals, df_a = detect_all_patterns(df)
             metrics = get_live_metrics(df_a)
             bt = run_sma_backtest(df_a)
+            tech = compute_technical_score(df_a)
+            quant = compute_quant_score(df_a)
+            fund = compute_fundamental_score(df_a)
+            overall = tech['score'] * 0.4 + quant['score'] * 0.3 + fund['score'] * 0.3
+            ud = get_up_down_analysis(df_a)
+            qnotes, qmetrics = get_quant_narrative(df_a)
 
-            # Price + key metrics
+            # ── Row 1: Price + Key Metrics ──
             cols = st.columns(5)
             cols[0].metric("Price", f"\u20b9{metrics['price']:.2f}")
             chg = metrics['change']
@@ -522,58 +530,98 @@ elif "AI Analysis" in page:
             cols[3].metric("Trend", metrics['trend'])
             cols[4].metric("Signals", f"{len(signals)} found")
 
-            # Chart
+            # ── Row 2: AI Chart with overlays ──
             st.markdown("### AI Chart — Candlestick + Pattern Detection")
             fig = render_ai_chart(df_a, signals)
             st.plotly_chart(fig, use_container_width=True)
 
-            # Detailed metrics
-            cols = st.columns(4)
-            cols[0].metric("SMA 9", f"\u20b9{metrics['sma9']:.2f}" if metrics['sma9'] else "--")
-            cols[1].metric("SMA 21", f"\u20b9{metrics['sma21']:.2f}" if metrics['sma21'] else "--")
-            cols[2].metric("Volatility", f"{metrics['volatility']:.2f}" if metrics['volatility'] else "--")
-            cols[3].metric("Support/Resist", "Active")
+            # ── Row 3: AI Score Gauge + Score Bars ──
+            st.markdown("### AI Score")
+            gcol, scols = st.columns([1, 2])
+            with gcol:
+                gfig = render_gauge(overall)
+                st.plotly_chart(gfig, use_container_width=True)
+            with scols:
+                vlabel, vcolor = verdict_from_score(overall)
+                st.markdown(f"**Verdict:** {vlabel}")
+                st.progress(int(tech['score']))
+                st.caption(f"Technical: {tech['score']:.0f}")
+                st.progress(int(quant['score']))
+                st.caption(f"Quant: {quant['score']:.0f}")
+                st.progress(int(fund['score']))
+                st.caption(f"Fundamental: {fund['score']:.0f}")
 
-            # Signal log
+            # ── Row 4: Detailed metrics + Up/Down ──
+            st.markdown("### Live Metrics")
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                st.markdown("**Quant Snapshot**")
+                st.metric("SMA 9", f"\u20b9{metrics['sma9']:.2f}" if metrics['sma9'] else "--")
+                st.metric("SMA 21", f"\u20b9{metrics['sma21']:.2f}" if metrics['sma21'] else "--")
+                st.metric("Volatility", f"{metrics['volatility']:.2f}" if metrics['volatility'] else "--")
+            with mcol2:
+                st.markdown("**Up vs Down Move**")
+                st.metric("From High", f"{ud['from_high']:.2f}%")
+                st.metric("From Low", f"{ud['from_low']:.2f}%")
+                st.metric("Up Candles", f"{ud['up_count']} ({ud['up_pct']:.0f}%)")
+                st.metric("Down Candles", f"{ud['down_count']} ({ud['down_pct']:.0f}%)")
+                up_bar = int(ud['up_pct'])
+                st.progress(up_bar if up_bar <= 100 else 100)
+
+            # ── Row 5: Deep Quant Analysis ──
+            st.markdown("### Deep Quant Analysis")
+            qcols = st.columns(6)
+            qcols[0].metric("Sharpe Ratio", f"{qmetrics['sharpe']:.2f}" if qmetrics['sharpe'] else "--")
+            qcols[1].metric("Z-Score", f"{qmetrics['zscore']:.2f}" if qmetrics['zscore'] else "--")
+            qcols[2].metric("Momentum", f"{qmetrics['momentum']:.2f}%" if qmetrics['momentum'] else "--")
+            qcols[3].metric("Ann. Volatility", f"{qmetrics['ann_vol']:.2f}%" if qmetrics['ann_vol'] else "--")
+            qcols[4].metric("Bollinger %", f"{qmetrics['bollinger']:.1f}%" if qmetrics['bollinger'] else "--")
+            qcols[5].metric("Return Skew", f"{qmetrics['skew']:.2f}" if qmetrics['skew'] else "--")
+
+            # Quant narrative
+            if qnotes:
+                for note in qnotes:
+                    st.markdown(f"- {note}")
+
+            # Returns histogram
+            hist_fig = render_returns_histogram(df_a)
+            if hist_fig:
+                st.plotly_chart(hist_fig, use_container_width=True)
+
+            # ── Row 6: AI Signal Log ──
             st.markdown("### AI Signal Log — Pattern Detection (kyun detect kiya)")
             if signals:
                 sig_data = []
                 for s in reversed(signals[-20:]):
-                    sig_data.append({
-                        "Type": s['type'],
-                        "Price": f"\u20b9{s['price']:.2f}",
-                        "Date": s['date'],
-                        "Reason": s['reason']
-                    })
-                sig_df = pd.DataFrame(sig_data)
-                st.dataframe(sig_df, use_container_width=True, hide_index=True)
+                    sig_data.append({"Type": s['type'], "Price": f"\u20b9{s['price']:.2f}",
+                        "Date": s['date'], "Reason": s['reason']})
+                st.dataframe(pd.DataFrame(sig_data), use_container_width=True, hide_index=True)
             else:
                 st.info("Ab tak koi pattern detect nahi hua...")
 
-            # Backtest
+            # ── Row 7: Backtest ──
             st.markdown("### SMA9/SMA21 Crossover Backtest")
-            btc = bt
-            cols = st.columns(4)
-            cols[0].metric("Win Rate", f"{btc['win_rate']:.0f}%")
-            cols[1].metric("Trades", btc['total_trades'])
-            cols[2].metric("Net P/L", f"{btc['net_pnl']:+.2f}%")
-            cols[3].metric("Max DD", f"{btc['max_drawdown']:.2f}%")
-
-            if btc['trades']:
+            bcols = st.columns(4)
+            bcols[0].metric("Win Rate", f"{bt['win_rate']:.0f}%")
+            bcols[1].metric("Trades", bt['total_trades'])
+            bcols[2].metric("Net P/L", f"{bt['net_pnl']:+.2f}%")
+            bcols[3].metric("Max Drawdown", f"{bt['max_drawdown']:.2f}%")
+            if bt['trades']:
                 td = []
-                for t in btc['trades']:
-                    td.append({
-                        "Entry Date": str(t['entry_date'])[:10],
-                        "Exit Date": str(t['exit_date'])[:10],
-                        "Entry": f"\u20b9{t['entry']:.2f}",
-                        "Exit": f"\u20b9{t['exit']:.2f}",
-                        "Return": f"{t['return_pct']:+.2f}%",
-                        "Win": "Yes" if t['win'] else "No"
-                    })
+                for t in bt['trades']:
+                    td.append({"Entry Date": str(t['entry_date'])[:10], "Exit Date": str(t['exit_date'])[:10],
+                        "Entry": f"\u20b9{t['entry']:.2f}", "Exit": f"\u20b9{t['exit']:.2f}",
+                        "Return": f"{t['return_pct']:+.2f}%", "Win": "Yes" if t['win'] else "No"})
                 st.dataframe(pd.DataFrame(td), use_container_width=True, hide_index=True)
 
+            # ── Analysis Notes ──
+            st.markdown("### Analysis Notes")
+            all_notes = tech['notes'] + quant['notes'] + fund['notes']
+            for note in all_notes:
+                st.markdown(f"- {note}")
+
             st.markdown("---")
-            st.warning("\u26a0\ufe0f Yeh sirf technical pattern analysis hai — trading advice nahi. Investment decisions ke liye SEBI-registered advisor se consult karein.")
+            st.warning("\u26a0\ufe0f Yeh sirf technical pattern analysis hai — trading advice nahi. SEBI-registered advisor se consult karein.")
 
 
 elif "Dashboard" in page:
