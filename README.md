@@ -1,45 +1,30 @@
 # AlgoDesk — Multi-Broker Stock Trading Dashboard (Streamlit)
 
 Switch between brokers from a dropdown; signals, charts, backtesting,
-paper trading, live orders (behind a confirmation step), and **social
-trading features** (groups, signal sharing, feed) all work the same way
-regardless of which broker is active.
+paper trading, and live orders (behind a confirmation step) all work the
+same way regardless of which broker is active.
 
 ## Broker status
 
 | Broker | Status | Login type | Notes |
 |---|---|---|---|
-| Zerodha (Kite Connect) | ✅ Fully implemented | Browser redirect | ₹2,000/month API subscription, daily token expiry |
-| Upstox | ✅ Fully implemented | Browser redirect | Free API. **Verify endpoints against current Upstox docs before going live** — see comment at top of `brokers/upstox.py` |
-| Angel One (SmartAPI) | ✅ Fully implemented | Direct login (client code + password + live TOTP) | Free API. Enable TOTP-based API login in the Angel One app first |
-| 5paisa | ⚠️ Not implemented | — | Adapter pattern is ready — see "Adding a new broker" below |
-| AliceBlue | ⚠️ Not implemented | — | Same as above |
-| Fyers | ⚠️ Not implemented | — | Same as above |
+| Zerodha (Kite Connect) | Fully implemented | Browser redirect | Rs 2,000/month API subscription, daily token expiry |
+| Upstox | Fully implemented | Browser redirect | Free API. Verify endpoints against current Upstox docs before going live |
+| Angel One (SmartAPI) | Fully implemented | Direct login (client code + password + live TOTP) | Free API. Enable TOTP-based API login in the Angel One app first |
+| 5paisa | Not implemented | — | Adapter pattern is ready — see "Adding a new broker" below |
+| AliceBlue | Not implemented | — | Same as above |
+| Fyers | Not implemented | — | Same as above |
 
 ## What this is / isn't
 
-- ✅ A real working dashboard: live signals (RSI+MACD+SMA), candlestick
-  charts, no-lookahead backtesting, paper trading, live order placement
-  (CONFIRM gate), and **social trading** (groups, shared signals, feed).
-- ❌ Not a 24/7 unattended bot. Streamlit only runs while the app/browser
+- A real working dashboard: live signals (RSI+MACD+SMA), candlestick
+  charts, no-lookahead backtesting, paper trading, and live order
+  placement that always requires typing `CONFIRM`.
+- Not a 24/7 unattended bot. Streamlit only runs while the app/browser
   session is active, and Zerodha/Upstox tokens expire daily requiring a
   fresh human login. For true unattended automation, run a separate
   always-on worker (VPS + scheduler) that writes to a shared database
   this dashboard reads from.
-
-## Social Trading Features (Demo Mode)
-
-- **👥 Social Hub:** Create password-protected trading groups. Join with
-  Group ID + password. View members, set per-group risk settings (capital
-  allocation, max loss limit). Instagram-inspired gradient UI.
-- **📡 Signal Share:** Post BUY/SELL AI signals to your groups. Auto-fill
-  from live broker data. Members respond yes/no → demo trades created.
-  Cyber terminal-style UI with neon green BUY / neon red SELL.
-- **📰 Feed:** Real-time activity feed across all your groups. Signal
-  stats dashboard (total, buy, sell, yes/no counts).
-
-All social features use session state (demo/sandbox mode) — no real
-money, no real broker execution.
 
 ## Setup
 
@@ -52,7 +37,7 @@ streamlit run app.py
 
 ### Getting API keys (you must do this yourself — no one else can)
 
-- **Zerodha**: developers.kite.trade → create app → ₹2,000/month
+- **Zerodha**: developers.kite.trade → create app → Rs 2,000/month
   subscription → note API key/secret → set redirect URL to your deployed
   app's URL.
 - **Upstox**: upstox.com/developer → create app (free) → note API
@@ -83,19 +68,22 @@ streamlit run app.py
 4. Add its login UI block in `app.py`'s Connect page, following the
   Zerodha/Upstox/Angel One examples.
 
+Everything else — Dashboard, Chart, Backtest, Paper Trading, Live Orders,
+Settings — needs zero changes, since they all talk to whatever broker is
+active through the same interface.
+
 ## Risk management
 
 Configurable in Settings: max capital per trade, stop-loss %,
 take-profit %, max open positions, daily loss limit. Enforced in the
 backtester; for live trading these are guardrails you should also watch
-manually.
+manually, since this app doesn't run unattended background monitoring.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `app.py` | Streamlit UI — broker selector + all pages including social |
-| `social.py` | Social trading layer (groups, signals, feed) |
+| `app.py` | Streamlit UI — broker selector + all pages |
 | `broker_factory.py` | Constructs the right broker adapter from secrets |
 | `brokers/base.py` | Abstract interface every broker adapter implements |
 | `brokers/zerodha.py`, `upstox.py`, `angelone.py` | Concrete adapters |
@@ -110,4 +98,3 @@ manually.
 
 Technical/analytical tool, not financial advice. Test in Paper Trading
 and Backtest thoroughly before ever using Live Orders with real capital.
-Social trading features are demo/sandbox mode — no real money.
